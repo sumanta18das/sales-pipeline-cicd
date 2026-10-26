@@ -1,0 +1,30 @@
+[project]
+name = "sales-pipeline"
+version = "0.1.0"
+description = "CI/CD demo: Dev to UAT to Prod on Azure Databricks"
+requires-python = ">=3.10"
+
+# ---------------------------------------------------------------------------
+# pytest: let tests import "transformations" from the src folder
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"
+
+# ---------------------------------------------------------------------------
+# ruff: linting (finds bugs and style problems before code is merged)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+# Databricks gives these names to notebooks automatically.
+# Tell ruff they exist so it does not report "undefined name".
+builtins = ["spark", "dbutils", "display"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]   # errors, pyflakes, import order, warnings
+
+[tool.ruff.lint.isort]
+known-first-party = ["transformations"]

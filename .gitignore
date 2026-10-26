@@ -1,0 +1,25 @@
+# Databricks bundle local state (never commit)
+.databricks/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Spark local files
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Secrets (never commit)
+.env
+*.pem

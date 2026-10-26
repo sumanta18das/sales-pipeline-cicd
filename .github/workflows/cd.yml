@@ -1,0 +1,132 @@
+# =============================================================================
+# CD = Continuous Deployment
+#
+# WHEN : every push to main (that means: every merged Pull Request)
+# FLOW :
+#
+#   main  -->  DEV workspace  -->  UAT workspace  -->  [approval]  -->  PROD workspace
+#
+#   Each stage: validate bundle -> deploy bundle -> run the job.
+#   The job ends with data quality checks (99_validate). If they fail,
+#   the stage fails and the next environment is NEVER touched.
+#
+# The SAME commit is promoted through all 3 environments.
+# Only the target (-t dev / uat / prod) changes.
+# =============================================================================
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deployments at the same time. A new one waits for the old one.
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1: DEV (automatic)
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      # PAT of THIS environment's workspace. Each GitHub environment
+      # (dev / uat / prod) stores the token of its own workspace, so the
+      # dev token can never touch prod. The workspace URL comes from
+      # databricks.yml (targets.<env>.workspace.host).
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t dev
+
+      - name: Deploy bundle to DEV
+        run: databricks bundle deploy -t dev
+
+      - name: Show what was deployed (click the job link to open the DEV workspace)
+        run: databricks bundle summary -t dev
+
+      - name: Run pipeline in DEV
+        run: databricks bundle run -t dev sales_pipeline_job
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: UAT (automatic, only if DEV passed)
+  # ---------------------------------------------------------------------------
+  deploy-uat:
+    name: Deploy to UAT
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: uat
+    env:
+      # PAT of THIS environment's workspace. Each GitHub environment
+      # (dev / uat / prod) stores the token of its own workspace, so the
+      # dev token can never touch prod. The workspace URL comes from
+      # databricks.yml (targets.<env>.workspace.host).
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t uat
+
+      - name: Deploy bundle to UAT
+        run: databricks bundle deploy -t uat
+
+      - name: Show what was deployed (click the job link to open the UAT workspace)
+        run: databricks bundle summary -t uat
+
+      - name: Run pipeline in UAT (with data quality checks)
+        run: databricks bundle run -t uat sales_pipeline_job
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: PROD (waits for a reviewer to click "Approve" in GitHub)
+  # The approval rule is set on the "prod" environment in repo Settings.
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to PROD
+    needs: deploy-uat
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      # PAT of THIS environment's workspace. Each GitHub environment
+      # (dev / uat / prod) stores the token of its own workspace, so the
+      # dev token can never touch prod. The workspace URL comes from
+      # databricks.yml (targets.<env>.workspace.host).
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t prod
+
+      - name: Deploy bundle to PROD
+        run: databricks bundle deploy -t prod
+
+      - name: Show what was deployed (click the job link to open the PROD workspace)
+        run: databricks bundle summary -t prod
+
+      # For the demo we run it once so you can see prod tables right away.
+      # In real projects you usually skip this: the daily schedule runs prod.
+      - name: Smoke run in PROD
+        run: databricks bundle run -t prod sales_pipeline_job

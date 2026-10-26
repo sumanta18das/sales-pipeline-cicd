@@ -1,0 +1,82 @@
+# =============================================================================
+# CI = Continuous Integration
+#
+# WHEN : every Pull Request to main (and manually from the Actions tab)
+# WHAT : 1. Lint the code (ruff)
+#        2. Run unit tests (pytest + local Spark, no Databricks needed)
+#        3. Validate the Databricks bundle (YAML is correct, workspace is reachable)
+# WHY  : If any step fails, the PR shows a red X and (with branch protection)
+#        cannot be merged. Bad code never reaches main.
+# =============================================================================
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# If you push again to the same PR, cancel the old run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: code quality (runs on GitHub's machine, free, no Databricks access)
+  # ---------------------------------------------------------------------------
+  test:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Java 17 (PySpark needs Java)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run unit tests
+        run: pytest -v
+
+  # ---------------------------------------------------------------------------
+  # Job 2: check the bundle config against the real workspace
+  # Runs only if Job 1 passed.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate Databricks bundle
+    needs: test
+    runs-on: ubuntu-latest
+    environment: dev          # uses the dev environment secret
+    env:
+      # PAT of THIS environment's workspace. Each GitHub environment
+      # (dev / uat / prod) stores the token of its own workspace, so the
+      # dev token can never touch prod. The workspace URL comes from
+      # databricks.yml (targets.<env>.workspace.host).
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate bundle for dev
+        run: databricks bundle validate -t dev

@@ -1,0 +1,65 @@
+# =============================================================================
+# The Databricks Job (Lakeflow Job) that runs the medallion pipeline:
+#
+#   bronze  ->  silver  ->  gold  ->  validate
+#
+# Compute: serverless (no cluster block needed).
+# If serverless jobs are NOT enabled in your workspace, use the classic cluster
+# version in docs/classic_cluster_job.yml instead (see the guide).
+# =============================================================================
+
+resources:
+  jobs:
+    sales_pipeline_job:
+      name: sales_pipeline_${bundle.target}
+      description: "Orders medallion pipeline. Deployed by CI/CD from GitHub. Do not edit in the UI."
+
+      # Tags are visible on the job page in each workspace.
+      # git_commit proves the SAME code version is running in dev, uat and prod.
+      tags:
+        project: sales_pipeline
+        environment: ${bundle.target}
+        git_commit: ${bundle.git.commit}
+
+      # Runs daily at 6 AM IST. Paused in dev and uat, running only in prod.
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: ${var.schedule_pause_status}
+
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+
+      # Job parameters are passed to EVERY task as notebook widgets.
+      # This is how one notebook writes to dev_catalog / uat_catalog / prod_catalog.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+      tasks:
+        - task_key: bronze
+          notebook_task:
+            notebook_path: ../src/01_bronze.py
+            base_parameters:
+              # The CSV is deployed together with the code (see data/orders.csv)
+              source_path: ${workspace.file_path}/data/orders.csv
+
+        - task_key: silver
+          depends_on:
+            - task_key: bronze
+          notebook_task:
+            notebook_path: ../src/02_silver.py
+
+        - task_key: gold
+          depends_on:
+            - task_key: silver
+          notebook_task:
+            notebook_path: ../src/03_gold.py
+
+        - task_key: validate
+          depends_on:
+            - task_key: gold
+          notebook_task:
+            notebook_path: ../src/99_validate.py

@@ -1,0 +1,83 @@
+# =============================================================================
+# databricks.yml : the bundle definition (the heart of CI/CD on Databricks)
+#
+# One bundle = one project. It says:
+#   - WHAT to deploy  (jobs, notebooks, files)  -> see resources/*.yml
+#   - WHERE to deploy (dev, uat, prod)          -> see "targets" below
+#
+# This project uses THREE separate Azure Databricks workspaces:
+#
+#   target   workspace        catalog        who deploys
+#   ------   ---------------  -------------  -------------------------------
+#   dev      dbx-cicd-dev     dev_catalog    CI/CD + developers (laptop)
+#   uat      dbx-cicd-uat     uat_catalog    CI/CD only
+#   prod     dbx-cicd-prod    prod_catalog   CI/CD only, after approval
+#
+# Same code goes to every workspace. Only the HOST and VARIABLES change.
+#
+# Commands:
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run      -t dev sales_pipeline_job
+#   databricks bundle destroy  -t dev
+# =============================================================================
+
+bundle:
+  name: sales_pipeline
+
+# Pull in every job/pipeline definition from the resources folder.
+include:
+  - resources/*.yml
+
+# -----------------------------------------------------------------------------
+# Variables: values that are different per environment
+# -----------------------------------------------------------------------------
+variables:
+  catalog:
+    description: Unity Catalog catalog for this environment
+  schema:
+    description: Schema (database) inside the catalog
+    default: sales
+  schedule_pause_status:
+    description: PAUSED or UNPAUSED. Only prod runs on a schedule.
+    default: PAUSED
+
+# -----------------------------------------------------------------------------
+# Targets = environments = workspaces
+#
+# TODO: replace the 3 "host" URLs with YOUR workspace URLs.
+#       Open each workspace in the browser and copy the URL up to ".net".
+# -----------------------------------------------------------------------------
+targets:
+
+  # DEV: for developers. "development" mode adds a "[dev <name>]" prefix to the
+  # job name and pauses schedules, so each person gets their own copy.
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-e6ea1ba4-c316.cloud.databricks.com/   # TODO: DEV workspace URL
+    variables:
+      catalog: dev_catalog
+
+  # UAT: for testing with business users. Deployed only by CI/CD.
+  # root_path = folder where code is uploaded: the home folder of the identity
+  # CI/CD uses (your PAT user now, a service principal later).
+  # uat:
+  #   mode: production
+  #   workspace:
+  #     host: https://adb-2222222222222222.2.azuredatabricks.net   # TODO: UAT workspace URL
+  #     root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+  #   variables:
+  #     catalog: uat_catalog
+
+  # PROD: the real thing. Deployed only by CI/CD after manual approval.
+  # Schedule is UNPAUSED here only.
+  # prod:
+  #   mode: production
+  #   workspace:
+  #     host: https://adb-3333333333333333.3.azuredatabricks.net   # TODO: PROD workspace URL
+  #     root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+  #   variables:
+  #     catalog: prod_catalog
+  #     schedule_pause_status: UNPAUSED

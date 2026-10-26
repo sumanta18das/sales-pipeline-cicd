@@ -1,0 +1,47 @@
+# =============================================================================
+# DESTROY (manual only): removes the deployed job and files from one environment.
+# Use it to clean up after the session.
+#
+# How: GitHub > Actions > "Destroy environment" > Run workflow > pick a target.
+# Destroying prod still needs approval (prod environment protection rule).
+# Tables in Unity Catalog are NOT dropped. Use scripts/99_cleanup.sql for that.
+# =============================================================================
+
+name: Destroy environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which environment to destroy
+        required: true
+        type: choice
+        options: [dev, uat, prod]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Destroy ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    env:
+      # PAT of THIS environment's workspace. Each GitHub environment
+      # (dev / uat / prod) stores the token of its own workspace, so the
+      # dev token can never touch prod. The workspace URL comes from
+      # databricks.yml (targets.<env>.workspace.host).
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Destroy bundle
+        run: databricks bundle destroy -t ${{ inputs.target }} --auto-approve

@@ -1,0 +1,80 @@
+# =============================================================================
+# USE THIS ONLY IF SERVERLESS JOBS ARE NOT ENABLED IN YOUR WORKSPACE.
+#
+# How to use:
+#   1. Copy this whole file over resources/sales_pipeline_job.yml
+#   2. Give the service principal the "Allow cluster creation" entitlement
+#      (Settings > Identity and access > Service principals > your SP > Configurations)
+#   3. Commit, push, and let CI/CD deploy as usual.
+#
+# It creates a small single-node job cluster that starts for the run and stops after.
+# =============================================================================
+
+resources:
+  jobs:
+    sales_pipeline_job:
+      name: sales_pipeline_${bundle.target}
+      description: "Orders medallion pipeline. Deployed by CI/CD from GitHub. Do not edit in the UI."
+
+      # Tags are visible on the job page in each workspace.
+      # git_commit proves the SAME code version is running in dev, uat and prod.
+      tags:
+        project: sales_pipeline
+        environment: ${bundle.target}
+        git_commit: ${bundle.git.commit}
+
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: ${var.schedule_pause_status}
+
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+      job_clusters:
+        - job_cluster_key: single_node
+          new_cluster:
+            spark_version: 15.4.x-scala2.12        # LTS runtime
+            node_type_id: Standard_D4ds_v5         # change if not available in your region
+            num_workers: 0
+            data_security_mode: SINGLE_USER        # required for Unity Catalog
+            spark_conf:
+              spark.master: "local[*, 4]"
+              spark.databricks.cluster.profile: singleNode
+            custom_tags:
+              ResourceClass: SingleNode
+
+      tasks:
+        - task_key: bronze
+          job_cluster_key: single_node
+          notebook_task:
+            notebook_path: ../src/01_bronze.py
+            base_parameters:
+              source_path: ${workspace.file_path}/data/orders.csv
+
+        - task_key: silver
+          job_cluster_key: single_node
+          depends_on:
+            - task_key: bronze
+          notebook_task:
+            notebook_path: ../src/02_silver.py
+
+        - task_key: gold
+          job_cluster_key: single_node
+          depends_on:
+            - task_key: silver
+          notebook_task:
+            notebook_path: ../src/03_gold.py
+
+        - task_key: validate
+          job_cluster_key: single_node
+          depends_on:
+            - task_key: gold
+          notebook_task:
+            notebook_path: ../src/99_validate.py
